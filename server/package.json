@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/index.js",
-    "start": "node src/index.js",
+    "dev": "node --import ./src/cors-register.js --watch src/index.js",
+    "start": "node --import ./src/cors-register.js src/index.js",
     "test": "node test/e2e.mjs"
   },
   "dependencies": {
