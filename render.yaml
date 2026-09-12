@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: 1a2b-online
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+

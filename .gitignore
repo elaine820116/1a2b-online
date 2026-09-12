@@ -1,0 +1,14 @@
+node_modules/
+.npm-cache/
+client/dist/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+
+# 保留在本機的舊版原型，不納入新版部署
+/game.js
+/index.html
+/server.js
+/styles.css
+/Codex 圖像*.png
