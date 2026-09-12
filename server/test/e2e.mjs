@@ -21,6 +21,7 @@ async function setup(mode) {
   const beforeA = await emit(a, 'room:enter', { code: host.room.code, session: host.session });
   await emit(b, 'room:enter', { code: host.room.code, session: guest.session });
   assert.equal(beforeA.room.answer, null);
+  assert.ok(beforeA.room.players.every((player) => player.history === undefined));
   assert.deepEqual(await emit(a, 'room:start'), { ok: true });
   return { a, b };
 }

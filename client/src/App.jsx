@@ -25,6 +25,7 @@ function Game({ room, socket, error, setError }) {
   }
   return <main><section className="form-card"><span className="eyebrow">即時 PK</span><h1>{finished ? `本局結束：答案 ${room.answer}` : '破解答案'}</h1>
     {!finished && <form onSubmit={submit}><Field label="輸入 4 個不重複數字"><input value={guess} onChange={(e) => setGuess(e.target.value)} inputMode="numeric" maxLength="4" required /></Field><button>送出猜測</button></form>}
+    {!finished && <section><h2>我的猜測紀錄</h2>{room.guesses.length === 0 ? <p>尚未送出猜測。</p> : room.guesses.map((item, index) => <p key={`${item.guess}-${index}`}>第 {index + 1} 次　{item.guess}　{item.A}A{item.B}B</p>)}</section>}
     <h2>{finished ? '最終排名' : '目前領先榜'}</h2>{ranking.map((p, index) => <p key={p.id}>{p.rank || index + 1}. {p.nickname}　{finished ? `共 ${p.attempts} 次` : `最高 ${Math.floor(p.best / 10)}A${p.best % 10}B`}</p>)}
     {finished && <><h2>所有猜測紀錄</h2>{room.players.map((p) => <div key={p.id}><strong>{p.nickname}</strong>{p.history.map((g, i) => <p key={i}>{g.guess}　{g.A}A{g.B}B</p>)}</div>)}<button onClick={() => location.assign('/')}>再玩一局</button></>}
     {!finished && <><h2>玩家 PK</h2>{room.players.map((p) => <p key={p.id}>{p.nickname}：第 {p.attempts} 次／最近 {p.last}</p>)}</>}{error && <p className="error">{error}</p>}</section></main>;
