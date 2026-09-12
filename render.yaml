@@ -17,9 +17,9 @@ services:
     staticPublishPath: ./client/dist
     envVars:
       - key: VITE_API_URL
-        value: https://1a2b-online-api.onrender.com
+        value: https://onea2b-online-api.onrender.com
       - key: VITE_SOCKET_URL
-        value: https://1a2b-online-api.onrender.com
+        value: https://onea2b-online-api.onrender.com
     routes:
       - type: rewrite
         source: /*
