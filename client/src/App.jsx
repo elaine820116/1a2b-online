@@ -8,7 +8,7 @@ const styleName = (style) => style === 'traditional' ? '傳統回合' : '競速�
 const modeName = (mode) => mode === 'all' ? '全員完成' : '率先猜中';
 
 async function post(path, body) {
-  const response = await fetch(`${api}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const response = await fetch(`${api}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(90000) });
   const data = await response.json();
   if (!response.ok) { const error = new Error(data.error); error.code = data.code; throw error; }
   return data;
@@ -68,7 +68,7 @@ function Waiting({ room, socket, error, setError }) {
 
 export default function App() {
   const code = location.pathname.match(/^\/r\/([\w-]+)$/)?.[1]?.toUpperCase();
-  const [room, setRoom] = useState(null), [error, setError] = useState(''), [nameError, setNameError] = useState('');
+  const [room, setRoom] = useState(null), [error, setError] = useState(''), [nameError, setNameError] = useState(''), [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState(() => code && localStorage.getItem(sessionKey(code)));
   const [form, setForm] = useState({ nickname: '', avatar: 1, name: '', password: '', maxPlayers: 4, mode: 'first', playStyle: 'race', allowMidJoin: false, turnSeconds: 20 });
   const socket = useRef();
@@ -84,22 +84,25 @@ export default function App() {
     return () => client.disconnect();
   }, [code, session]);
   async function join(event) {
-    event.preventDefault(); setError(''); setNameError('');
+    event.preventDefault(); if (submitting) return; setSubmitting(true); setError(''); setNameError('');
     try { const result = await post(`/api/rooms/${code}/join`, { nickname: form.nickname, avatar: form.avatar, password: form.password }); localStorage.setItem(sessionKey(code), result.session); setSession(result.session); setRoom(result.room); }
-    catch (cause) { if (cause.code === 'DUPLICATE_NICKNAME') setNameError('暱稱重複'); else setError(cause.message); }
+    catch (cause) { if (cause.code === 'DUPLICATE_NICKNAME') setNameError('暱稱重複'); else setError(cause.name === 'TimeoutError' ? '伺服器啟動逾時，請稍後再試。' : cause.message || '連線失敗，請稍後再試。'); }
+    finally { setSubmitting(false); }
   }
   async function create(event) {
-    event.preventDefault(); setError('');
+    event.preventDefault(); if (submitting) return; setSubmitting(true); setError('');
     try { const result = await post('/api/rooms', form); localStorage.setItem(sessionKey(result.room.code), result.session); history.replaceState({}, '', `/r/${result.room.code}`); setSession(result.session); setRoom(result.room); }
-    catch (cause) { setError(cause.message); }
+    catch (cause) { setError(cause.name === 'TimeoutError' ? '伺服器啟動逾時，請稍後再試。' : cause.message || '連線失敗，請稍後再試。'); }
+    finally { setSubmitting(false); }
   }
   if (room?.status === 'playing' || room?.status === 'finished') return <Game room={room} socket={socket} error={error} setError={setError} />;
   if (room) return <Waiting room={room} socket={socket} error={error} setError={setError} />;
   const joining = Boolean(code);
   return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">1A2B / ONLINE PK</span><h1>{joining ? '選好角色，加入挑戰。' : '集結朋友，破解秘密數字。'}</h1><p>選一位探險家，分享房間網址，展開你的 1A2B 對決。</p></div><form className="panel room-form" onSubmit={joining ? join : create}>
     <Field label="暱稱" note={nameError && <span className="field-error">暱稱重複</span>}><input required maxLength="20" value={form.nickname} onChange={(event) => { setForm({ ...form, nickname: event.target.value }); setNameError(''); }} /></Field>
+    <Field label="房間密碼"><input required type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
     <AvatarPicker selected={form.avatar} onSelect={(avatar) => setForm({ ...form, avatar })} />
     {!joining && <><Field label="房間名稱（可留空）"><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field><div className="form-pair"><Field label="玩家上限"><select value={form.maxPlayers} onChange={(event) => setForm({ ...form, maxPlayers: Number(event.target.value) })}>{[2,3,4,5,6,7,8,9,10].map((number) => <option key={number}>{number}</option>)}</select></Field><Field label="結束方式"><select value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value })}><option value="first">第一位猜中立即結束</option><option value="all">全部玩家完成</option></select></Field></div><Field label="玩法"><select value={form.playStyle} onChange={(event) => setForm({ ...form, playStyle: event.target.value })}><option value="race">競速 · 自由猜測</option><option value="traditional">傳統 · 同步回合</option></select></Field>{form.playStyle === 'traditional' && <Field label="每輪猜測時間"><select value={form.turnSeconds} onChange={(event) => setForm({ ...form, turnSeconds: Number(event.target.value) })}><option value="15">15 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">1 分鐘</option></select></Field>}<label className="check-field"><input type="checkbox" checked={form.allowMidJoin} onChange={(event) => setForm({ ...form, allowMidJoin: event.target.checked })} /><span><strong>允許中途加入</strong><small>傳統玩法的新玩家從下一輪開始；競速玩法可立即開始。</small></span></label></>}
-    <Field label="房間密碼"><input required type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>{error && <p className="error">{error}</p>}<button>{joining ? '加入等待室 →' : '建立房間 →'}</button>
+    {error && <p className="error" role="alert">{error}</p>}{submitting && <p className="submit-status" role="status">正在連線，免費伺服器喚醒時可能需要約 1 分鐘…</p>}<button disabled={submitting} className="room-submit">{submitting ? '正在建立連線…' : joining ? '加入等待室 →' : '建立房間 →'}</button>
   </form></main>;
 }
