@@ -26,11 +26,11 @@ function view(room, viewer) {
     guesses: viewer.guesses,
     canGuess: room.status === 'playing' && !viewer.done &&
       (room.playStyle === 'race' || (viewer.fromRound <= room.round && !viewer.roundSubmitted)),
-    players: room.players.map((player, index) => {
+    players: [...room.players, ...(finished ? room.departed : [])].map((player, index) => {
       const actual = player.guesses.filter((guess) => !guess.missed);
       return {
         id: player.token, nickname: player.name, avatar: player.avatar, isHost: index === 0,
-        connected: player.connected, ready: player.ready, attempts: actual.length,
+        connected: player.connected, ready: player.ready, exited: Boolean(player.exited), attempts: actual.length,
         roundSubmitted: player.roundSubmitted,
         last: actual.at(-1) ? `${actual.at(-1).A}A${actual.at(-1).B}B` : '—',
         best: actual.reduce((best, guess) => Math.max(best, guess.A * 10 + guess.B), 0),
@@ -81,7 +81,7 @@ app.post('/api/rooms', (request, response) => {
   const room = { code, name: String(body.name || '').trim().slice(0, 40), password: body.password,
     maxPlayers, mode: body.mode, playStyle: body.playStyle, allowMidJoin: body.allowMidJoin === true,
     turnSeconds: body.playStyle === 'traditional' ? turnSeconds : null,
-    status: 'waiting', players: [player], round: 0, roundDeadline: null, timer: null };
+    status: 'waiting', players: [player], departed: [], round: 0, roundDeadline: null, timer: null };
   rooms.set(code, room); response.status(201).json({ session: player.token, room: view(room, player) });
 });
 app.post('/api/rooms/:code/join', (request, response) => {
@@ -110,6 +110,7 @@ io.on('connection', (socket) => {
   socket.on('room:ready', (reply) => {
     const { room, player } = roomFor(socket);
     if (!room || !player || room.status !== 'waiting') return reply?.({ error: '目前無法切換 Ready。' });
+    if (room.players[0] === player) return reply?.({ error: '房主不需要按 READY。' });
     player.ready = !player.ready; reply?.({ ok: true }); send(room);
   });
   socket.on('room:start', (reply) => {
@@ -118,8 +119,28 @@ io.on('connection', (socket) => {
     if (room.players[0] !== player) return reply?.({ error: '只有房主能開始遊戲。' });
     if (room.status !== 'waiting') return reply?.({ error: '遊戲已開始。' });
     if (room.players.filter((item) => item.connected).length < 2) return reply?.({ error: '至少需要 2 位在線玩家。' });
+    if (room.players.slice(1).some((item) => !item.connected || !item.ready)) return reply?.({ error: '所有玩家都需在線並按下 READY 才能開始。' });
     room.status = 'playing'; room.answer = answer(); reply?.({ ok: true });
     if (room.playStyle === 'traditional') nextRound(room); else send(room);
+  });
+  socket.on('room:leave', (reply) => {
+    const { room, player } = roomFor(socket);
+    if (!room || !player) return reply?.({ error: '房間已失效。' });
+    room.players.splice(room.players.indexOf(player), 1);
+    if (room.status !== 'waiting') { player.exited = true; player.connected = false; room.departed.push(player); }
+    reply?.({ ok: true });
+    io.to(player.token).emit('room:left');
+    io.in(player.token).socketsLeave(player.token);
+    if (!room.players.length) {
+      if (room.timer) clearTimeout(room.timer);
+      rooms.delete(room.code);
+      return;
+    }
+    if (room.status === 'playing') {
+      if (room.mode === 'all' && room.players.every((item) => item.done)) finish(room);
+      else maybeAdvance(room);
+    }
+    send(room);
   });
   socket.on('game:guess', (guess, reply) => {
     const { room, player } = roomFor(socket);

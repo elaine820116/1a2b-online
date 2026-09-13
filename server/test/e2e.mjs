@@ -23,6 +23,9 @@ async function setup(mode) {
   assert.equal(beforeA.room.answer, null);
   assert.deepEqual(beforeA.room.players.map((player) => player.avatar), [2, 5]);
   assert.ok(beforeA.room.players.every((player) => player.history === undefined));
+  assert.match((await emit(a, 'room:start')).error, /READY/);
+  assert.match((await emit(a, 'room:ready')).error, /房主/);
+  assert.deepEqual(await emit(b, 'room:ready'), { ok: true });
   assert.deepEqual(await emit(a, 'room:start'), { ok: true });
   const hostPlaying = await emit(a, 'room:enter', { code: host.room.code, session: host.session });
   const guestPlaying = await emit(b, 'room:enter', { code: host.room.code, session: guest.session });
@@ -71,6 +74,8 @@ try {
   hostSocket.connect(); guestSocket.connect(); await Promise.all([connect(hostSocket), connect(guestSocket)]);
   await emit(hostSocket, 'room:enter', { code: newRoom.room.code, session: newRoom.session });
   await emit(guestSocket, 'room:enter', { code: newRoom.room.code, session: guest.session });
+  assert.match((await emit(hostSocket, 'room:start')).error, /READY/);
+  await emit(guestSocket, 'room:ready');
   assert.deepEqual(await emit(hostSocket, 'room:start'), { ok: true });
   const hostGuess = await emit(hostSocket, 'game:guess', '1234');
   assert.ok(hostGuess.result);
@@ -93,6 +98,7 @@ try {
   ta.connect(); tb.connect(); await Promise.all([connect(ta), connect(tb)]);
   await emit(ta, 'room:enter', { code: timeoutRoom.room.code, session: timeoutRoom.session });
   await emit(tb, 'room:enter', { code: timeoutRoom.room.code, session: timeoutGuest.session });
+  await emit(tb, 'room:ready');
   await emit(ta, 'room:start');
   assert.ok((await emit(ta, 'game:guess', '1234')).result);
   const afterTimeout = await Promise.race([
@@ -104,7 +110,24 @@ try {
   assert.equal(guestAfterTimeout.room.guesses[0].missed, true);
   assert.equal(guestAfterTimeout.room.players[0].history, undefined);
   ta.close(); tb.close();
-  console.log('E2E passed: race modes, secret protection, private/public histories, duplicate names, traditional rounds and mid-join');
+  const exitRoom = await api('/api/rooms', { nickname: '主', password: 'pw', maxPlayers: 3, mode: 'all', playStyle: 'race' });
+  const staying = await api(`/api/rooms/${exitRoom.room.code}/join`, { nickname: '留', password: 'pw' });
+  const leaving = await api(`/api/rooms/${exitRoom.room.code}/join`, { nickname: '退', password: 'pw' });
+  const xs = [exitRoom, staying, leaving].map(() => io(base, { autoConnect: false }));
+  xs.forEach((socket) => socket.connect()); await Promise.all(xs.map(connect));
+  await Promise.all(xs.map((socket, index) => emit(socket, 'room:enter', { code: exitRoom.room.code, session: [exitRoom, staying, leaving][index].session })));
+  await emit(xs[1], 'room:ready'); await emit(xs[2], 'room:ready');
+  await emit(xs[0], 'room:start');
+  assert.deepEqual(await emit(xs[2], 'room:leave'), { ok: true });
+  await solve(xs[0]);
+  const beforeLast = await emit(xs[1], 'room:enter', { code: exitRoom.room.code, session: staying.session });
+  assert.equal(beforeLast.room.status, 'playing', 'one remaining unfinished player must keep all mode open');
+  const exitFinal = await latest(xs[1], () => solve(xs[1]));
+  assert.equal(exitFinal.status, 'finished');
+  assert.equal(exitFinal.players.filter((player) => player.exited).length, 1);
+  assert.ok(exitFinal.players.find((player) => player.exited).history);
+  xs.forEach((socket) => socket.close());
+  console.log('E2E passed: race modes, READY gate, leave, secret protection, private/public histories, duplicate names, traditional rounds and mid-join');
 } finally {
   server.kill();
 }
