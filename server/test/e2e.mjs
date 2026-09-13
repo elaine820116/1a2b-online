@@ -23,6 +23,8 @@ async function setup(mode) {
   const beforeA = await emit(a, 'room:enter', { code: host.room.code, session: host.session });
   await emit(b, 'room:enter', { code: host.room.code, session: guest.session });
   assert.equal(beforeA.room.answer, null);
+  assert.notEqual(beforeA.room.viewerId, host.session, 'public player ID must not reveal the private session');
+  assert.ok(beforeA.room.players.every((player) => player.id !== host.session && player.id !== guest.session));
   assert.deepEqual(beforeA.room.players.map((player) => player.avatar), [2, 5]);
   assert.ok(beforeA.room.players.every((player) => player.history === undefined));
   assert.match((await emit(a, 'room:start')).error, /READY/);
@@ -131,7 +133,46 @@ try {
   assert.equal(exitFinal.players.filter((player) => player.exited).length, 1);
   assert.ok(exitFinal.players.find((player) => player.exited).history);
   xs.forEach((socket) => socket.close());
-  console.log('E2E passed: race modes, READY gate, leave, secret protection, private/public histories, duplicate names, traditional rounds and mid-join');
+  const solo = await api('/api/rooms', { solo: true, nickname: '單人測試', digits: 7 });
+  assert.equal(solo.room.status, 'playing'); assert.equal(solo.room.digits, 7); assert.equal(solo.room.answer, null);
+  assert.equal(solo.room.canGuess, true); assert.notEqual(solo.room.viewerId, solo.session);
+  const soloSocket = io(base, { autoConnect: false }); soloSocket.connect(); await connect(soloSocket);
+  await emit(soloSocket, 'room:enter', { code: solo.room.code, session: solo.session });
+  assert.match((await emit(soloSocket, 'game:guess', '1234')).error, /7 個/);
+  assert.ok((await emit(soloSocket, 'game:guess', '0123456')).result);
+  const soloJoin = await fetch(base + `/api/rooms/${solo.room.code}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nickname: '闖入', inviteToken: solo.room.inviteToken }) });
+  assert.equal(soloJoin.status, 409);
+  soloSocket.close();
+  for (const difficulty of ['low', 'medium', 'high']) {
+    const botRoom = await api('/api/rooms', { nickname: `玩家${difficulty}`, password: 'pw', maxPlayers: 2, mode: 'first', playStyle: 'race', digits: 4, botCount: 1, botDifficulty: difficulty });
+    assert.equal(botRoom.room.players[1].isBot, true);
+    assert.equal(botRoom.room.players[1].difficulty, difficulty);
+    const human = io(base, { autoConnect: false }); human.connect(); await connect(human);
+    await emit(human, 'room:enter', { code: botRoom.room.code, session: botRoom.session });
+    const status = await (await fetch(`${base}/api/status`)).json();
+    assert.ok(status.activeRooms >= 1 && status.connectedHumans >= 1 && status.bots >= 1);
+    assert.deepEqual(await emit(human, 'room:start'), { ok: true }, 'one human and one ready bot can start');
+    const botMove = await Promise.race([
+      new Promise((resolve) => { const onUpdate = (state) => { if (state.players[1].attempts > 0) { human.off('room:update', onUpdate); resolve(state); } }; human.on('room:update', onUpdate); }),
+      delay(11000).then(() => { throw new Error(`${difficulty} bot did not guess`); }),
+    ]);
+    if (botMove.status === 'playing') assert.equal(botMove.players[1].history, undefined, 'bot guesses stay hidden until finish');
+    human.close();
+  }
+  const invalidBots = await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nickname: '過量電腦', password: 'pw', maxPlayers: 2, mode: 'first', playStyle: 'race', botCount: 2 }) });
+  assert.equal(invalidBots.status, 400);
+  const traditionalBot = await api('/api/rooms', { nickname: '回合玩家', password: 'pw', maxPlayers: 2, mode: 'all', playStyle: 'traditional', turnSeconds: 15, digits: 5, botCount: 1, botDifficulty: 'medium' });
+  const roundHuman = io(base, { autoConnect: false }); roundHuman.connect(); await connect(roundHuman);
+  await emit(roundHuman, 'room:enter', { code: traditionalBot.room.code, session: traditionalBot.session });
+  await emit(roundHuman, 'room:start');
+  assert.ok((await emit(roundHuman, 'game:guess', '01234')).result);
+  const botRound = await Promise.race([
+    new Promise((resolve) => { const onUpdate = (state) => { if (state.round >= 2) { roundHuman.off('room:update', onUpdate); resolve(state); } }; roundHuman.on('room:update', onUpdate); }),
+    delay(12000).then(() => { throw new Error('traditional bot did not complete its turn'); }),
+  ]);
+  assert.equal(botRound.players[1].attempts, 1);
+  roundHuman.close();
+  console.log('E2E passed: race modes, READY gate, leave, solo seven digits, bots, secret protection, private/public histories, duplicate names, traditional rounds and mid-join');
 } finally {
   server.kill();
 }
