@@ -19,7 +19,7 @@ const activePlayers = (room) => room.players.filter((player) => !player.done && 
 function view(room, viewer) {
   const finished = room.status === 'finished';
   return {
-    code: room.code, name: room.name, maxPlayers: room.maxPlayers, mode: room.mode,
+    code: room.code, inviteToken: room.inviteToken, name: room.name, maxPlayers: room.maxPlayers, mode: room.mode,
     playStyle: room.playStyle, allowMidJoin: room.allowMidJoin, turnSeconds: room.turnSeconds,
     round: room.round, roundDeadline: room.roundDeadline, status: room.status,
     isHost: viewer === room.players[0], answer: finished ? room.answer : null,
@@ -78,7 +78,7 @@ app.post('/api/rooms', (request, response) => {
   if (body.playStyle === 'traditional' && ![15, 20, 30, 60].includes(turnSeconds)) return response.status(400).json({ error: '請選擇有效的回合秒數。' });
   const player = { token: token(), name, avatar: avatar(body.avatar), connected: false, ready: false, guesses: [], roundSubmitted: false, fromRound: 1 };
   let code; do { code = randomBytes(3).toString('hex').slice(0, 4).toUpperCase(); } while (rooms.has(code));
-  const room = { code, name: String(body.name || '').trim().slice(0, 40), password: body.password,
+  const room = { code, inviteToken: randomBytes(16).toString('hex'), name: String(body.name || '').trim().slice(0, 40), password: body.password,
     maxPlayers, mode: body.mode, playStyle: body.playStyle, allowMidJoin: body.allowMidJoin === true,
     turnSeconds: body.playStyle === 'traditional' ? turnSeconds : null,
     status: 'waiting', players: [player], departed: [], round: 0, roundDeadline: null, timer: null };
@@ -89,7 +89,8 @@ app.post('/api/rooms/:code/join', (request, response) => {
   if (!room) return response.status(404).json({ error: '房間已失效，請重新建立。' });
   const name = nickname(request.body?.nickname);
   if (!name) return response.status(400).json({ error: '請輸入暱稱。' });
-  if (request.body?.password !== room.password) return response.status(403).json({ error: '房間密碼不正確。' });
+  const validInvite = typeof request.body?.inviteToken === 'string' && request.body.inviteToken === room.inviteToken;
+  if (!validInvite && request.body?.password !== room.password) return response.status(403).json({ error: request.body?.inviteToken ? '邀請連結無效，請重新取得。' : '房間密碼不正確。' });
   if (duplicate(room, name)) return response.status(409).json({ error: '暱稱重複', code: 'DUPLICATE_NICKNAME' });
   if (room.players.length >= room.maxPlayers) return response.status(409).json({ error: '房間已滿。' });
   if (room.status === 'finished' || (room.status === 'playing' && !room.allowMidJoin)) return response.status(409).json({ error: '遊戲已開始，無法加入。' });

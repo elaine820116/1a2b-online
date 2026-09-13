@@ -15,7 +15,9 @@ async function api(path, body) {
 }
 async function setup(mode) {
   const host = await api('/api/rooms', { nickname: '甲', avatar: 2, password: 'test1234', maxPlayers: 2, mode, playStyle: 'race', allowMidJoin: false });
-  const guest = await api(`/api/rooms/${host.room.code}/join`, { nickname: '乙', avatar: 5, password: 'test1234' });
+  assert.match(host.room.inviteToken, /^[a-f0-9]{32}$/);
+  const guest = await api(`/api/rooms/${host.room.code}/join`, { nickname: '乙', avatar: 5, inviteToken: host.room.inviteToken });
+  assert.equal(guest.room.inviteToken, host.room.inviteToken);
   const a = io(base, { autoConnect: false }), b = io(base, { autoConnect: false });
   a.connect(); b.connect(); await Promise.all([connect(a), connect(b)]);
   const beforeA = await emit(a, 'room:enter', { code: host.room.code, session: host.session });
@@ -66,6 +68,8 @@ try {
   const allFinal = await latest(all.b, () => solve(all.b));
   assert.equal(allFinal.status, 'finished'); assert.deepEqual(allFinal.players.map((p) => p.rank).sort(), [1, 2]); assert.ok(allFinal.players.every((p) => p.history)); all.a.close(); all.b.close();
   const newRoom = await api('/api/rooms', { nickname: '房主', password: 'pw', maxPlayers: 3, mode: 'first', playStyle: 'traditional', turnSeconds: 15, allowMidJoin: true });
+  const invalidInvite = await fetch(base + `/api/rooms/${newRoom.room.code}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nickname: '無效連結', inviteToken: 'wrong' }) });
+  assert.equal(invalidInvite.status, 403, 'invalid invite link must not bypass the password');
   const duplicateResponse = await fetch(base + `/api/rooms/${newRoom.room.code}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nickname: '房主', password: 'pw' }) });
   assert.equal(duplicateResponse.status, 409);
   assert.equal((await duplicateResponse.json()).code, 'DUPLICATE_NICKNAME');

@@ -4,18 +4,32 @@ import { io } from 'socket.io-client';
 const api = import.meta.env.VITE_API_URL || '';
 const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
 const sessionKey = (code) => `1a2b:${code}`;
+const inviteUrl = (room) => `${location.origin}/r/${room.code}?invite=${encodeURIComponent(room.inviteToken)}`;
 const styleName = (style) => style === 'traditional' ? '傳統回合' : '競速挑戰';
 const modeName = (mode) => mode === 'all' ? '全員完成' : '率先猜中';
 let audioContext;
 function enableAudio() {
   try { audioContext ||= new window.AudioContext(); audioContext.resume(); } catch { /* Browser audio is optional. */ }
 }
+function clickSound() {
+  enableAudio();
+  if (!audioContext) return;
+  const oscillator = audioContext.createOscillator(), volume = audioContext.createGain();
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(560, audioContext.currentTime);
+  oscillator.frequency.exponentialRampToValueAtTime(820, audioContext.currentTime + 0.07);
+  volume.gain.setValueAtTime(0.0001, audioContext.currentTime);
+  volume.gain.exponentialRampToValueAtTime(0.065, audioContext.currentTime + 0.01);
+  volume.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.1);
+  oscillator.connect(volume).connect(audioContext.destination);
+  oscillator.start(); oscillator.stop(audioContext.currentTime + 0.11);
+}
 function tickSound(urgent) {
   if (!audioContext || audioContext.state !== 'running') return;
   const oscillator = audioContext.createOscillator(), volume = audioContext.createGain();
   oscillator.type = 'sine'; oscillator.frequency.value = urgent ? 900 : 620;
   volume.gain.setValueAtTime(0.0001, audioContext.currentTime);
-  volume.gain.exponentialRampToValueAtTime(0.12, audioContext.currentTime + 0.01);
+  volume.gain.exponentialRampToValueAtTime(0.144, audioContext.currentTime + 0.01);
   volume.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.12);
   oscillator.connect(volume).connect(audioContext.destination);
   oscillator.start(); oscillator.stop(audioContext.currentTime + 0.13);
@@ -85,11 +99,17 @@ function Game({ room, socket, error, setError, onLeave }) {
 function Waiting({ room, socket, error, setError, onLeave }) {
   const own = room.players.find((player) => player.id === socket.current?.data?.session);
   const canStart = room.isHost && room.players.length >= 2 && room.players.every((player) => player.connected && (player.isHost || player.ready));
-  return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">WAITING ROOM</span><h1>{room.name || '1A2B PK 房間'}</h1><p>{styleName(room.playStyle)} · {modeName(room.mode)} · {room.allowMidJoin ? '可中途加入' : '開始後不可加入'}</p></div><section className="panel"><div className="section-heading"><h2>邀請朋友</h2><Badge>{room.code}</Badge></div><div className="invite"><span>私人邀請網址</span><code>{location.origin}/r/{room.code}</code><button type="button" onClick={() => navigator.clipboard.writeText(`${location.origin}/r/${room.code}`)}>複製網址</button></div><h2>玩家 · {room.players.length}/{room.maxPlayers}</h2>{room.players.map((player) => <div className="player-row" key={player.id}><Avatar id={player.avatar} name={player.nickname} /><div><strong>{player.nickname}{player.isHost ? ' · 房主' : ''}</strong><small>{player.isHost ? '房主' : player.connected ? player.ready ? 'READY' : '未 READY' : '已離線'}</small></div></div>)}<div className="actions">{!room.isHost && <button className="secondary-button" aria-pressed={Boolean(own?.ready)} onClick={() => { enableAudio(); socket.current?.emit('room:ready', (result) => result?.error && setError(result.error)); }}>{own?.ready ? '取消 READY' : 'READY'}</button>}{room.isHost && <button disabled={!canStart} onClick={() => { enableAudio(); socket.current?.emit('room:start', (result) => result?.error && setError(result.error)); }}>開始遊戲 →</button>}</div>{room.isHost && !canStart && <p className="waiting-note">至少兩位玩家在線，且所有非房主玩家按下 READY 後即可開始。</p>}<button type="button" className="exit-button waiting-exit" onClick={onLeave}>退出房間</button>{error && <p className="error">{error}</p>}</section></main>;
+  return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">WAITING ROOM</span><h1>{room.name || '1A2B PK 房間'}</h1><p>{styleName(room.playStyle)} · {modeName(room.mode)} · {room.allowMidJoin ? '可中途加入' : '開始後不可加入'}</p></div><section className="panel"><div className="room-code-display"><span>房號</span><strong>{room.code}</strong><small>口頭告訴朋友房號時，對方仍需輸入房間密碼。</small></div><div className="section-heading"><h2>邀請朋友</h2></div><div className="invite"><span>私人邀請網址 · 使用完整網址可免密碼加入</span><code>{inviteUrl(room)}</code><button type="button" onClick={() => navigator.clipboard.writeText(inviteUrl(room))}>複製邀請網址</button></div><h2>玩家 · {room.players.length}/{room.maxPlayers}</h2>{room.players.map((player) => <div className="player-row" key={player.id}><Avatar id={player.avatar} name={player.nickname} /><div><strong>{player.nickname}{player.isHost ? ' · 房主' : ''}</strong><small>{player.isHost ? '房主' : player.connected ? player.ready ? 'READY' : '未 READY' : '已離線'}</small></div></div>)}<div className="actions">{!room.isHost && <button className="secondary-button" aria-pressed={Boolean(own?.ready)} onClick={() => { enableAudio(); socket.current?.emit('room:ready', (result) => result?.error && setError(result.error)); }}>{own?.ready ? '取消 READY' : 'READY'}</button>}{room.isHost && <button disabled={!canStart} onClick={() => { enableAudio(); socket.current?.emit('room:start', (result) => result?.error && setError(result.error)); }}>開始遊戲 →</button>}</div>{room.isHost && !canStart && <p className="waiting-note">至少兩位玩家在線，且所有非房主玩家按下 READY 後即可開始。</p>}<button type="button" className="exit-button waiting-exit" onClick={onLeave}>退出房間</button>{error && <p className="error">{error}</p>}</section></main>;
 }
 
 export default function App() {
+  useEffect(() => {
+    const onClick = (event) => { if (event.target.closest('button:not(:disabled)')) clickSound(); };
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, []);
   const code = location.pathname.match(/^\/r\/([\w-]+)$/)?.[1]?.toUpperCase();
+  const inviteToken = new URLSearchParams(location.search).get('invite') || '';
   const [room, setRoom] = useState(null), [error, setError] = useState(''), [nameError, setNameError] = useState(''), [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState(() => code && localStorage.getItem(sessionKey(code)));
   const [entry, setEntry] = useState(code ? 'join' : 'choice');
@@ -110,13 +130,13 @@ export default function App() {
   }, [code, session]);
   async function join(event) {
     event.preventDefault(); if (submitting) return; setSubmitting(true); setError(''); setNameError('');
-    try { const result = await post(`/api/rooms/${code}/join`, { nickname: form.nickname, avatar: form.avatar, password: form.password }); localStorage.setItem(sessionKey(code), result.session); setSession(result.session); setRoom(result.room); }
+    try { const result = await post(`/api/rooms/${code}/join`, { nickname: form.nickname, avatar: form.avatar, password: form.password, inviteToken }); localStorage.setItem(sessionKey(code), result.session); setSession(result.session); setRoom(result.room); }
     catch (cause) { if (cause.code === 'DUPLICATE_NICKNAME') setNameError('暱稱重複'); else setError(cause.name === 'TimeoutError' ? '伺服器啟動逾時，請稍後再試。' : cause.message || '連線失敗，請稍後再試。'); }
     finally { setSubmitting(false); }
   }
   async function create(event) {
     event.preventDefault(); if (submitting) return; setSubmitting(true); setError('');
-    try { const result = await post('/api/rooms', form); localStorage.setItem(sessionKey(result.room.code), result.session); history.replaceState({}, '', `/r/${result.room.code}`); setSession(result.session); setRoom(result.room); }
+    try { const result = await post('/api/rooms', form); localStorage.setItem(sessionKey(result.room.code), result.session); history.replaceState({}, '', `/r/${result.room.code}?invite=${encodeURIComponent(result.room.inviteToken)}`); setSession(result.session); setRoom(result.room); }
     catch (cause) { setError(cause.name === 'TimeoutError' ? '伺服器啟動逾時，請稍後再試。' : cause.message || '連線失敗，請稍後再試。'); }
     finally { setSubmitting(false); }
   }
@@ -131,9 +151,9 @@ export default function App() {
   if (!code && entry === 'choice') return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">1A2B / ONLINE PK</span><h1>集結朋友，破解秘密數字。</h1><p>選擇建立私人房間，或輸入朋友分享的房號加入。</p></div><section className="entry-options"><button type="button" className="entry-card" onClick={() => setEntry('create')}><strong>建立房間</strong><span>設定玩法、邀請朋友，開啟一場對決 →</span></button><button type="button" className="entry-card" onClick={() => setEntry('join-code')}><strong>加入房間</strong><span>已有房號？輸入後選擇角色加入 →</span></button></section></main>;
   if (!code && entry === 'join-code') return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">JOIN A ROOM</span><h1>加入朋友的房間。</h1><p>請輸入邀請網址最後的房號。</p></div><form className="panel room-form" onSubmit={(event) => { event.preventDefault(); location.assign(`/r/${roomCode.trim().toUpperCase()}`); }}><Field label="房號"><input required autoFocus maxLength="12" value={roomCode} onChange={(event) => setRoomCode(event.target.value.toUpperCase())} placeholder="例如 ABC123" /></Field><button className="room-submit">下一步 →</button><button type="button" className="secondary-button" onClick={() => setEntry('choice')}>返回</button></form></main>;
   const joining = Boolean(code);
-  return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">1A2B / ONLINE PK</span><h1>{joining ? '選好角色，加入挑戰。' : '建立你的挑戰房間。'}</h1><p>選一位探險家，分享房間網址，展開你的 1A2B 對決。</p></div><form className="panel room-form" onSubmit={joining ? join : create}>
+  return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">1A2B / ONLINE PK</span><h1>{joining ? '選好角色，加入挑戰。' : '建立你的挑戰房間。'}</h1><p>{joining && inviteToken ? '這是免密碼邀請連結，輸入暱稱並選好角色即可加入。' : '選一位探險家，分享房間網址，展開你的 1A2B 對決。'}</p></div><form className="panel room-form" onSubmit={joining ? join : create}>
     <Field label="暱稱" note={nameError && <span className="field-error">暱稱重複</span>}><input required maxLength="20" value={form.nickname} onChange={(event) => { setForm({ ...form, nickname: event.target.value }); setNameError(''); }} /></Field>
-    <Field label="房間密碼"><input required type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
+    {(!joining || !inviteToken) && <Field label="房間密碼"><input required type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>}
     <AvatarPicker selected={form.avatar} onSelect={(avatar) => setForm({ ...form, avatar })} />
     {!joining && <><Field label="房間名稱（可留空）"><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field><div className="form-pair"><Field label="玩家上限"><select value={form.maxPlayers} onChange={(event) => setForm({ ...form, maxPlayers: Number(event.target.value) })}>{[2,3,4,5,6,7,8,9,10].map((number) => <option key={number}>{number}</option>)}</select></Field><Field label="結束方式"><select value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value })}><option value="first">第一位猜中立即結束</option><option value="all">全部玩家完成</option></select></Field></div><Field label="玩法"><select value={form.playStyle} onChange={(event) => setForm({ ...form, playStyle: event.target.value })}><option value="race">競速 · 自由猜測</option><option value="traditional">傳統 · 同步回合</option></select></Field>{form.playStyle === 'traditional' && <Field label="每輪猜測時間"><select value={form.turnSeconds} onChange={(event) => setForm({ ...form, turnSeconds: Number(event.target.value) })}><option value="15">15 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">1 分鐘</option></select></Field>}<label className="check-field"><input type="checkbox" checked={form.allowMidJoin} onChange={(event) => setForm({ ...form, allowMidJoin: event.target.checked })} /><span><strong>允許中途加入</strong><small>傳統玩法的新玩家從下一輪開始；競速玩法可立即開始。</small></span></label></>}
     {error && <p className="error" role="alert">{error}</p>}{submitting && <p className="submit-status" role="status">正在連線，免費伺服器喚醒時可能需要約 1 分鐘…</p>}<button disabled={submitting} className="room-submit">{submitting ? '正在建立連線…' : joining ? '加入等待室 →' : '建立房間 →'}</button>{!joining && <button type="button" className="secondary-button" onClick={() => setEntry('choice')}>返回選擇</button>}
