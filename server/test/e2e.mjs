@@ -14,19 +14,21 @@ async function api(path, body) {
   return response.json();
 }
 async function setup(mode) {
-  const host = await api('/api/rooms', { nickname: '甲', password: 'test1234', maxPlayers: 2, mode, playStyle: 'race', allowMidJoin: false });
-  const guest = await api(`/api/rooms/${host.room.code}/join`, { nickname: '乙', password: 'test1234' });
+  const host = await api('/api/rooms', { nickname: '甲', avatar: 2, password: 'test1234', maxPlayers: 2, mode, playStyle: 'race', allowMidJoin: false });
+  const guest = await api(`/api/rooms/${host.room.code}/join`, { nickname: '乙', avatar: 5, password: 'test1234' });
   const a = io(base, { autoConnect: false }), b = io(base, { autoConnect: false });
   a.connect(); b.connect(); await Promise.all([connect(a), connect(b)]);
   const beforeA = await emit(a, 'room:enter', { code: host.room.code, session: host.session });
   await emit(b, 'room:enter', { code: host.room.code, session: guest.session });
   assert.equal(beforeA.room.answer, null);
+  assert.deepEqual(beforeA.room.players.map((player) => player.avatar), [2, 5]);
   assert.ok(beforeA.room.players.every((player) => player.history === undefined));
   assert.deepEqual(await emit(a, 'room:start'), { ok: true });
   const hostPlaying = await emit(a, 'room:enter', { code: host.room.code, session: host.session });
   const guestPlaying = await emit(b, 'room:enter', { code: host.room.code, session: guest.session });
   assert.equal(hostPlaying.room.canGuess, true, 'race host must be able to guess');
   assert.equal(guestPlaying.room.canGuess, true, 'race guest must be able to guess');
+  assert.deepEqual(guestPlaying.room.players.map((player) => player.avatar), [2, 5], 'avatar choices must survive room re-entry');
   return { a, b };
 }
 async function solve(socket) {

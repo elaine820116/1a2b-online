@@ -12,6 +12,7 @@ app.use(express.json());
 const token = () => randomBytes(12).toString('hex');
 const answer = () => { let digits = ''; while (digits.length < 4) { const digit = String(Math.floor(Math.random() * 10)); if (!digits.includes(digit)) digits += digit; } return digits; };
 const nickname = (value) => String(value || '').trim().slice(0, 20);
+const avatar = (value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 6 ? Number(value) : 1;
 const duplicate = (room, name) => room.players.some((player) => player.name.toLocaleLowerCase() === name.toLocaleLowerCase());
 const activePlayers = (room) => room.players.filter((player) => !player.done && player.fromRound <= room.round);
 
@@ -28,7 +29,7 @@ function view(room, viewer) {
     players: room.players.map((player, index) => {
       const actual = player.guesses.filter((guess) => !guess.missed);
       return {
-        id: player.token, nickname: player.name, isHost: index === 0,
+        id: player.token, nickname: player.name, avatar: player.avatar, isHost: index === 0,
         connected: player.connected, ready: player.ready, attempts: actual.length,
         roundSubmitted: player.roundSubmitted,
         last: actual.at(-1) ? `${actual.at(-1).A}A${actual.at(-1).B}B` : '—',
@@ -75,7 +76,7 @@ app.post('/api/rooms', (request, response) => {
   if (!['race', 'traditional'].includes(body.playStyle)) return response.status(400).json({ error: '玩法不正確。' });
   const turnSeconds = Number(body.turnSeconds);
   if (body.playStyle === 'traditional' && ![15, 20, 30, 60].includes(turnSeconds)) return response.status(400).json({ error: '請選擇有效的回合秒數。' });
-  const player = { token: token(), name, connected: false, ready: false, guesses: [], roundSubmitted: false, fromRound: 1 };
+  const player = { token: token(), name, avatar: avatar(body.avatar), connected: false, ready: false, guesses: [], roundSubmitted: false, fromRound: 1 };
   let code; do { code = randomBytes(3).toString('hex').slice(0, 4).toUpperCase(); } while (rooms.has(code));
   const room = { code, name: String(body.name || '').trim().slice(0, 40), password: body.password,
     maxPlayers, mode: body.mode, playStyle: body.playStyle, allowMidJoin: body.allowMidJoin === true,
@@ -92,7 +93,7 @@ app.post('/api/rooms/:code/join', (request, response) => {
   if (duplicate(room, name)) return response.status(409).json({ error: '暱稱重複', code: 'DUPLICATE_NICKNAME' });
   if (room.players.length >= room.maxPlayers) return response.status(409).json({ error: '房間已滿。' });
   if (room.status === 'finished' || (room.status === 'playing' && !room.allowMidJoin)) return response.status(409).json({ error: '遊戲已開始，無法加入。' });
-  const player = { token: token(), name, ready: false, connected: false, guesses: [], roundSubmitted: false,
+  const player = { token: token(), name, avatar: avatar(request.body?.avatar), ready: false, connected: false, guesses: [], roundSubmitted: false,
     fromRound: room.status === 'playing' && room.playStyle === 'traditional' ? room.round + 1 : room.round };
   room.players.push(player); send(room); response.json({ session: player.token, room: view(room, player) });
 });
