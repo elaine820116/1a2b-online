@@ -23,6 +23,10 @@ async function setup(mode) {
   assert.equal(beforeA.room.answer, null);
   assert.ok(beforeA.room.players.every((player) => player.history === undefined));
   assert.deepEqual(await emit(a, 'room:start'), { ok: true });
+  const hostPlaying = await emit(a, 'room:enter', { code: host.room.code, session: host.session });
+  const guestPlaying = await emit(b, 'room:enter', { code: host.room.code, session: guest.session });
+  assert.equal(hostPlaying.room.canGuess, true, 'race host must be able to guess');
+  assert.equal(guestPlaying.room.canGuess, true, 'race guest must be able to guess');
   return { a, b };
 }
 async function solve(socket) {

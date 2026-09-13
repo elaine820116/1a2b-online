@@ -23,8 +23,8 @@ function view(room, viewer) {
     round: room.round, roundDeadline: room.roundDeadline, status: room.status,
     isHost: viewer === room.players[0], answer: finished ? room.answer : null,
     guesses: viewer.guesses,
-    canGuess: room.status === 'playing' && !viewer.done && viewer.fromRound <= room.round &&
-      (room.playStyle === 'race' || !viewer.roundSubmitted),
+    canGuess: room.status === 'playing' && !viewer.done &&
+      (room.playStyle === 'race' || (viewer.fromRound <= room.round && !viewer.roundSubmitted)),
     players: room.players.map((player, index) => {
       const actual = player.guesses.filter((guess) => !guess.missed);
       return {
