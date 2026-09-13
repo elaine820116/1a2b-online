@@ -1,1 +1,148 @@
-import express from'express';import{createServer}from'node:http';import{randomBytes}from'node:crypto';import{Server}from'socket.io';const rooms=new Map,app=express(),server=createServer(app),io=new Server(server,{cors:{origin:true}});app.use(express.json());const tok=()=>randomBytes(12).toString('hex'),ans=()=>{let x='';while(x.length<4){let d=''+Math.floor(Math.random()*10);if(!x.includes(d))x+=d}return x},view=(r,p)=>({code:r.code,name:r.name,maxPlayers:r.max,mode:r.mode,status:r.status,isHost:p===r.players[0],answer:r.status==='finished'?r.answer:null,guesses:p.guesses,players:r.players.map((x,i)=>({id:x.token,nickname:x.name,isHost:i===0,connected:x.connected,ready:x.ready,attempts:x.guesses.length,last:x.guesses.at(-1)?`${x.guesses.at(-1).A}A${x.guesses.at(-1).B}B`:'—',best:x.guesses.reduce((m,g)=>Math.max(m,g.A*10+g.B),0),rank:x.rank,history:r.status==='finished'?x.guesses:undefined}))}),send=r=>r.players.forEach(p=>io.to(p.token).emit('room:update',view(r,p)));app.post('/api/rooms',(q,s)=>{let p={token:tok(),name:q.body.nickname||'房主',ready:false,connected:false,guesses:[]},r={code:tok().slice(0,4).toUpperCase(),name:q.body.name||'',password:q.body.password,max:+q.body.maxPlayers,mode:q.body.mode,status:'waiting',players:[p]};rooms.set(r.code,r);s.status(201).json({session:p.token,room:view(r,p)})});app.post('/api/rooms/:code/join',(q,s)=>{let r=rooms.get(q.params.code.toUpperCase());if(!r)return s.status(404).json({error:'房間已失效，請重新建立。'});if(q.body.password!==r.password)return s.status(403).json({error:'房間密碼不正確。'});let p={token:tok(),name:q.body.nickname,ready:false,connected:false,guesses:[]};r.players.push(p);s.json({session:p.token,room:view(r,p)})});app.get('/health',(_,s)=>s.json({ok:true}));io.on('connection',s=>{s.on('room:enter',(d,a)=>{let r=rooms.get(d.code),p=r?.players.find(x=>x.token===d.session);if(!p)return a({error:'房間已失效，請重新建立。'});s.data={code:r.code,token:p.token};s.join(p.token);p.connected=true;a({room:view(r,p)});send(r)});s.on('room:ready',a=>{let r=rooms.get(s.data.code),p=r.players.find(x=>x.token===s.data.token);p.ready=!p.ready;a?.({ok:true});send(r)});s.on('room:start',a=>{let r=rooms.get(s.data.code);if(r.players[0].token!==s.data.token)return a({error:'只有房主能開始遊戲。'});if(r.players.filter(x=>x.connected).length<2)return a({error:'至少需要 2 位在線玩家。'});r.status='playing';r.answer=ans();a({ok:true});send(r)});s.on('game:guess',(g,a)=>{let r=rooms.get(s.data.code),p=r.players.find(x=>x.token===s.data.token);if(!/^\d{4}$/.test(g)||new Set(g).size<4)return a({error:'請輸入 4 個不重複數字。'});let A=0,B=0;[...g].forEach((d,i)=>r.answer[i]===d?A++:r.answer.includes(d)&&B++);p.guesses.push({guess:g,A,B});if(A===4){p.done=Date.now();if(r.mode==='first'||r.players.every(x=>x.done)){r.status='finished';[...r.players].sort((x,y)=>x.done-y.done||x.guesses.length-y.guesses.length).forEach((x,i)=>x.rank=i+1)}}a({result:{guess:g,A,B}});send(r)})});server.listen(process.env.PORT||3001);
+import express from 'express';
+import { createServer } from 'node:http';
+import { randomBytes } from 'node:crypto';
+import { Server } from 'socket.io';
+
+const rooms = new Map();
+const app = express();
+const server = createServer(app);
+const io = new Server(server, { cors: { origin: true } });
+app.use(express.json());
+
+const token = () => randomBytes(12).toString('hex');
+const answer = () => { let digits = ''; while (digits.length < 4) { const digit = String(Math.floor(Math.random() * 10)); if (!digits.includes(digit)) digits += digit; } return digits; };
+const nickname = (value) => String(value || '').trim().slice(0, 20);
+const duplicate = (room, name) => room.players.some((player) => player.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+const activePlayers = (room) => room.players.filter((player) => !player.done && player.fromRound <= room.round);
+
+function view(room, viewer) {
+  const finished = room.status === 'finished';
+  return {
+    code: room.code, name: room.name, maxPlayers: room.maxPlayers, mode: room.mode,
+    playStyle: room.playStyle, allowMidJoin: room.allowMidJoin, turnSeconds: room.turnSeconds,
+    round: room.round, roundDeadline: room.roundDeadline, status: room.status,
+    isHost: viewer === room.players[0], answer: finished ? room.answer : null,
+    guesses: viewer.guesses,
+    canGuess: room.status === 'playing' && !viewer.done && viewer.fromRound <= room.round &&
+      (room.playStyle === 'race' || !viewer.roundSubmitted),
+    players: room.players.map((player, index) => {
+      const actual = player.guesses.filter((guess) => !guess.missed);
+      return {
+        id: player.token, nickname: player.name, isHost: index === 0,
+        connected: player.connected, ready: player.ready, attempts: actual.length,
+        roundSubmitted: player.roundSubmitted,
+        last: actual.at(-1) ? `${actual.at(-1).A}A${actual.at(-1).B}B` : '—',
+        best: actual.reduce((best, guess) => Math.max(best, guess.A * 10 + guess.B), 0),
+        done: Boolean(player.done), rank: player.rank,
+        history: finished ? player.guesses : undefined,
+      };
+    }),
+  };
+}
+function send(room) { room.players.forEach((player) => io.to(player.token).emit('room:update', view(room, player))); }
+function finish(room) {
+  if (room.timer) clearTimeout(room.timer);
+  room.timer = null; room.roundDeadline = null; room.status = 'finished';
+  room.players.filter((player) => player.done).sort((a, b) => a.done - b.done || a.guesses.length - b.guesses.length)
+    .forEach((player, index) => { player.rank = index + 1; });
+}
+function nextRound(room) {
+  if (room.status !== 'playing' || room.playStyle !== 'traditional') return;
+  if (room.timer) clearTimeout(room.timer);
+  room.round += 1;
+  room.players.forEach((player) => { player.roundSubmitted = false; });
+  room.roundDeadline = Date.now() + room.turnSeconds * 1000;
+  room.timer = setTimeout(() => {
+    activePlayers(room).filter((player) => !player.roundSubmitted).forEach((player) => player.guesses.push({ round: room.round, missed: true }));
+    nextRound(room); send(room);
+  }, room.turnSeconds * 1000);
+  room.timer.unref?.(); send(room);
+}
+function maybeAdvance(room) {
+  if (room.playStyle === 'traditional' && room.status === 'playing' && activePlayers(room).every((player) => player.roundSubmitted)) nextRound(room);
+}
+function roomFor(socket) {
+  const room = rooms.get(socket.data.code);
+  return { room, player: room?.players.find((item) => item.token === socket.data.token) };
+}
+
+app.post('/api/rooms', (request, response) => {
+  const body = request.body || {}, name = nickname(body.nickname), maxPlayers = Number(body.maxPlayers);
+  if (!name) return response.status(400).json({ error: '請輸入暱稱。' });
+  if (!String(body.password || '')) return response.status(400).json({ error: '請設定房間密碼。' });
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 10) return response.status(400).json({ error: '玩家上限須為 2～10 人。' });
+  if (!['first', 'all'].includes(body.mode)) return response.status(400).json({ error: '遊戲模式不正確。' });
+  if (!['race', 'traditional'].includes(body.playStyle)) return response.status(400).json({ error: '玩法不正確。' });
+  const turnSeconds = Number(body.turnSeconds);
+  if (body.playStyle === 'traditional' && ![15, 20, 30, 60].includes(turnSeconds)) return response.status(400).json({ error: '請選擇有效的回合秒數。' });
+  const player = { token: token(), name, connected: false, ready: false, guesses: [], roundSubmitted: false, fromRound: 1 };
+  let code; do { code = randomBytes(3).toString('hex').slice(0, 4).toUpperCase(); } while (rooms.has(code));
+  const room = { code, name: String(body.name || '').trim().slice(0, 40), password: body.password,
+    maxPlayers, mode: body.mode, playStyle: body.playStyle, allowMidJoin: body.allowMidJoin === true,
+    turnSeconds: body.playStyle === 'traditional' ? turnSeconds : null,
+    status: 'waiting', players: [player], round: 0, roundDeadline: null, timer: null };
+  rooms.set(code, room); response.status(201).json({ session: player.token, room: view(room, player) });
+});
+app.post('/api/rooms/:code/join', (request, response) => {
+  const room = rooms.get(request.params.code.toUpperCase());
+  if (!room) return response.status(404).json({ error: '房間已失效，請重新建立。' });
+  const name = nickname(request.body?.nickname);
+  if (!name) return response.status(400).json({ error: '請輸入暱稱。' });
+  if (request.body?.password !== room.password) return response.status(403).json({ error: '房間密碼不正確。' });
+  if (duplicate(room, name)) return response.status(409).json({ error: '暱稱重複', code: 'DUPLICATE_NICKNAME' });
+  if (room.players.length >= room.maxPlayers) return response.status(409).json({ error: '房間已滿。' });
+  if (room.status === 'finished' || (room.status === 'playing' && !room.allowMidJoin)) return response.status(409).json({ error: '遊戲已開始，無法加入。' });
+  const player = { token: token(), name, ready: false, connected: false, guesses: [], roundSubmitted: false,
+    fromRound: room.status === 'playing' && room.playStyle === 'traditional' ? room.round + 1 : room.round };
+  room.players.push(player); send(room); response.json({ session: player.token, room: view(room, player) });
+});
+app.get('/health', (_, response) => response.json({ ok: true }));
+
+io.on('connection', (socket) => {
+  socket.on('room:enter', (data, reply) => {
+    const room = rooms.get(String(data?.code || '').toUpperCase());
+    const player = room?.players.find((item) => item.token === data?.session);
+    if (!player) return reply?.({ error: '房間已失效，請重新建立。' });
+    socket.data = { code: room.code, token: player.token }; socket.join(player.token); player.connected = true;
+    reply?.({ room: view(room, player) }); send(room);
+  });
+  socket.on('room:ready', (reply) => {
+    const { room, player } = roomFor(socket);
+    if (!room || !player || room.status !== 'waiting') return reply?.({ error: '目前無法切換 Ready。' });
+    player.ready = !player.ready; reply?.({ ok: true }); send(room);
+  });
+  socket.on('room:start', (reply) => {
+    const { room, player } = roomFor(socket);
+    if (!room || !player) return reply?.({ error: '房間已失效。' });
+    if (room.players[0] !== player) return reply?.({ error: '只有房主能開始遊戲。' });
+    if (room.status !== 'waiting') return reply?.({ error: '遊戲已開始。' });
+    if (room.players.filter((item) => item.connected).length < 2) return reply?.({ error: '至少需要 2 位在線玩家。' });
+    room.status = 'playing'; room.answer = answer(); reply?.({ ok: true });
+    if (room.playStyle === 'traditional') nextRound(room); else send(room);
+  });
+  socket.on('game:guess', (guess, reply) => {
+    const { room, player } = roomFor(socket);
+    if (!room || !player || room.status !== 'playing') return reply?.({ error: '遊戲尚未開始或已結束。' });
+    if (player.done) return reply?.({ error: '你已猜中。' });
+    if (room.playStyle === 'traditional' && player.fromRound > room.round) return reply?.({ error: '請等待下一輪開始。' });
+    if (room.playStyle === 'traditional' && player.roundSubmitted) return reply?.({ error: '本輪已猜測，請等待其他玩家。' });
+    if (typeof guess !== 'string' || !/^\d{4}$/.test(guess) || new Set(guess).size !== 4) return reply?.({ error: '請輸入 4 個不重複數字。' });
+    let A = 0, B = 0;
+    [...guess].forEach((digit, index) => room.answer[index] === digit ? A++ : room.answer.includes(digit) && B++);
+    player.guesses.push({ guess, A, B, round: room.playStyle === 'traditional' ? room.round : undefined });
+    if (room.playStyle === 'traditional') player.roundSubmitted = true;
+    if (A === 4) { player.done = Date.now(); if (room.mode === 'first' || room.players.every((item) => item.done)) finish(room); }
+    reply?.({ result: { guess, A, B } }); maybeAdvance(room); send(room);
+  });
+  socket.on('disconnect', () => {
+    const { room, player } = roomFor(socket);
+    if (!room || !player) return;
+    player.connected = io.sockets.adapter.rooms.get(player.token)?.size > 0;
+    if (room.players[0] === player && !player.connected) {
+      const nextHost = room.players.find((item) => item.connected);
+      if (nextHost) { room.players.splice(room.players.indexOf(nextHost), 1); room.players.unshift(nextHost); }
+    }
+    send(room);
+  });
+});
+server.listen(process.env.PORT || 3001);
