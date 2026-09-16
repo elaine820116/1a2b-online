@@ -55,7 +55,7 @@ function AvatarPicker({ selected, onSelect }) {
 function Chat({ room, socket, setError }) {
   const [message, setMessage] = useState('');
   const end = useRef();
-  useEffect(() => end.current?.scrollIntoView({ block: 'nearest' }), [room.chat?.length]);
+  useEffect(() => { if (typeof end.current?.scrollIntoView === 'function') end.current.scrollIntoView({ block: 'nearest' }); }, [room.chat?.length]);
   function send(event) {
     event.preventDefault();
     socket.current?.emit('chat:send', message, (result) => {
