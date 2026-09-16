@@ -52,6 +52,31 @@ function AvatarPicker({ selected, onSelect }) {
   return <fieldset className="avatar-picker"><legend>選擇你的探險家</legend><p>六位原創角色，選一位代表你加入挑戰。</p><div className="avatar-options">{avatars.map((id) => <button type="button" className={`avatar-option ${selected === id ? 'selected' : ''}`} aria-label={`${id <= 3 ? '男生' : '女生'}角色 ${id <= 3 ? id : id - 3}`} aria-pressed={selected === id} key={id} onClick={() => onSelect(id)}><Avatar id={id} name={`角色 ${id}`} /><span>{id <= 3 ? `男生 ${id}` : `女生 ${id - 3}`}</span></button>)}</div></fieldset>;
 }
 
+function HomeMusic() {
+  const player = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const restart = () => {
+    if (!player.current) return;
+    player.current.currentTime = 1;
+    player.current.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  };
+  useEffect(() => {
+    const audio = player.current;
+    if (!audio) return undefined;
+    audio.volume = 0.22;
+    const keepExcerptLooping = () => { if (audio.currentTime >= 24.8) restart(); };
+    audio.addEventListener('timeupdate', keepExcerptLooping);
+    restart();
+    return () => { audio.removeEventListener('timeupdate', keepExcerptLooping); audio.pause(); };
+  }, []);
+  function toggle() {
+    if (!player.current) return;
+    if (player.current.paused) restart();
+    else { player.current.pause(); setPlaying(false); }
+  }
+  return <div className="home-music"><audio ref={player} src="/audio/home-mobile-casual-intro.mp3" preload="auto" onEnded={restart} /><button type="button" className="music-toggle" aria-pressed={playing} onClick={toggle}>{playing ? '♫ 首頁音樂播放中' : '♪ 開啟首頁音樂'}</button></div>;
+}
+
 function Chat({ room, socket, setError }) {
   const [message, setMessage] = useState('');
   const end = useRef();
@@ -179,7 +204,7 @@ export default function App() {
   }
   if (room?.status === 'playing' || room?.status === 'finished') return <Game room={room} socket={socket} error={error} setError={setError} onLeave={leave} />;
   if (room) return <Waiting room={room} socket={socket} error={error} setError={setError} onLeave={leave} />;
-  if (!code && entry === 'choice') return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">1A2B / ONLINE PK</span><h1>集結朋友，破解秘密數字。</h1><p>單人練習，或建立房間與朋友、電腦展開對決。</p></div><section className="entry-options"><button type="button" className="entry-card" onClick={() => setEntry('solo')}><strong>單人模式</strong><span>一人即可開始，挑戰秘密數字 →</span></button><button type="button" className="entry-card" onClick={() => setEntry('create')}><strong>建立房間</strong><span>設定玩法、邀請朋友或加入電腦 →</span></button><button type="button" className="entry-card" onClick={() => setEntry('join-code')}><strong>使用房號加入</strong><span>已有房號？輸入後選擇角色加入 →</span></button></section><section className="occupancy-panel" aria-live="polite"><strong>目前遊玩狀態</strong>{status ? <p>{status.activeRooms} 間進行中的房間 · {status.connectedHumans} 位線上真人 · {status.bots} 位電腦</p> : <p>目前無法取得即時房／人數，不影響建立房間。</p>}<small>每間房最多 10 位比賽玩家與 4 位觀戰者。</small></section><section className="lobby-panel"><div className="section-heading"><div><span className="eyebrow">LIVE LOBBY</span><h2>在線房間</h2></div><Badge muted>{lobbyRooms.length} 間</Badge></div>{lobbyRooms.length ? <div className="lobby-list">{lobbyRooms.map((item) => <article className="lobby-room" key={item.code}><div><strong>{item.name}</strong><small>房號 {item.code} · {item.digits} 位數 · {styleName(item.playStyle)} · {item.passwordRequired ? '🔒 需要密碼' : '公開房'}</small><span>{item.players}/{item.maxPlayers} 位玩家 · {item.spectators}/4 位觀戰</span></div><button onClick={() => location.assign(`/r/${item.code}?role=${item.status === 'playing' ? 'spectator' : 'player'}`)}>{item.status === 'playing' ? '加入觀戰' : '加入比賽'}</button></article>)}</div> : <p className="empty-state">目前沒有在線的多人房，建立一間邀請大家吧。</p>}</section></main>;
+  if (!code && entry === 'choice') return <main className="narrow-page expedition-page"><HomeMusic /><div className="hero"><span className="eyebrow">1A2B / ONLINE PK</span><h1>集結朋友，破解秘密數字。</h1><p>單人練習，或建立房間與朋友、電腦展開對決。</p></div><section className="entry-options"><button type="button" className="entry-card" onClick={() => setEntry('solo')}><strong>單人模式</strong><span>一人即可開始，挑戰秘密數字 →</span></button><button type="button" className="entry-card" onClick={() => setEntry('create')}><strong>建立房間</strong><span>設定玩法、邀請朋友或加入電腦 →</span></button><button type="button" className="entry-card" onClick={() => setEntry('join-code')}><strong>使用房號加入</strong><span>已有房號？輸入後選擇角色加入 →</span></button></section><section className="occupancy-panel" aria-live="polite"><strong>目前遊玩狀態</strong>{status ? <p>{status.activeRooms} 間進行中的房間 · {status.connectedHumans} 位線上真人 · {status.bots} 位電腦</p> : <p>目前無法取得即時房／人數，不影響建立房間。</p>}<small>每間房最多 10 位比賽玩家與 4 位觀戰者。</small></section><section className="lobby-panel"><div className="section-heading"><div><span className="eyebrow">LIVE LOBBY</span><h2>在線房間</h2></div><Badge muted>{lobbyRooms.length} 間</Badge></div>{lobbyRooms.length ? <div className="lobby-list">{lobbyRooms.map((item) => <article className="lobby-room" key={item.code}><div><strong>{item.name}</strong><small>房號 {item.code} · {item.digits} 位數 · {styleName(item.playStyle)} · {item.passwordRequired ? '🔒 需要密碼' : '公開房'}</small><span>{item.players}/{item.maxPlayers} 位玩家 · {item.spectators}/4 位觀戰</span></div><button onClick={() => location.assign(`/r/${item.code}?role=${item.status === 'playing' ? 'spectator' : 'player'}`)}>{item.status === 'playing' ? '加入觀戰' : '加入比賽'}</button></article>)}</div> : <p className="empty-state">目前沒有在線的多人房，建立一間邀請大家吧。</p>}</section></main>;
   if (!code && entry === 'join-code') return <main className="narrow-page expedition-page"><div className="hero"><span className="eyebrow">JOIN A ROOM</span><h1>加入朋友的房間。</h1><p>請輸入邀請網址最後的房號。</p></div><form className="panel room-form" onSubmit={(event) => { event.preventDefault(); location.assign(`/r/${roomCode.trim().toUpperCase()}`); }}><Field label="房號"><input required autoFocus maxLength="12" value={roomCode} onChange={(event) => setRoomCode(event.target.value.toUpperCase())} placeholder="例如 ABC123" /></Field><button className="room-submit">下一步 →</button><button type="button" className="secondary-button" onClick={() => setEntry('choice')}>返回</button></form></main>;
   const joining = Boolean(code);
   const solo = !joining && entry === 'solo';
