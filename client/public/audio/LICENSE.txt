@@ -8,3 +8,15 @@ Downloaded: 2026-09-16
 The game uses an approximately 24-second excerpt (about 00:01-00:25) as
 background music on the initial screen. The source page marks this track as
 Content ID Registered.
+
+Track: 8 HALO | Cute BGM
+Creator: bluelike_u
+Source: https://pixabay.com/music/upbeat-8-halo-cute-bgm-274661/
+License: Pixabay Content License
+Use: Waiting room background music
+
+Track: 3 Cream Soda | Cute BGM
+Creator: bluelike_u
+Source: https://pixabay.com/music/video-games-3-cream-soda-cute-bgm-271159/
+License: Pixabay Content License
+Use: Battle background music
