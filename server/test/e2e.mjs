@@ -172,7 +172,27 @@ try {
   ]);
   assert.equal(botRound.players[1].attempts, 1);
   roundHuman.close();
-  console.log('E2E passed: race modes, READY gate, leave, solo seven digits, bots, secret protection, private/public histories, duplicate names, traditional rounds and mid-join');
+  const publicRoom = await api('/api/rooms', { nickname: '公開房主', password: '', maxPlayers: 2, mode: 'first', playStyle: 'race', digits: 4 });
+  const publicGuest = await api(`/api/rooms/${publicRoom.room.code}/join`, { nickname: '公開玩家', password: '' });
+  const publicHostSocket = io(base, { autoConnect: false }); publicHostSocket.connect(); await connect(publicHostSocket);
+  await emit(publicHostSocket, 'room:enter', { code: publicRoom.room.code, session: publicRoom.session });
+  const lobby = await (await fetch(`${base}/api/rooms`)).json();
+  const lobbyRoom = lobby.rooms.find((item) => item.code === publicRoom.room.code);
+  assert.equal(lobbyRoom.passwordRequired, false); assert.equal(lobbyRoom.players, 2);
+  const spectators = [];
+  for (let index = 1; index <= 4; index++) spectators.push(await api(`/api/rooms/${publicRoom.room.code}/join`, { nickname: `觀戰${index}`, role: 'spectator' }));
+  const fullSpectators = await fetch(base + `/api/rooms/${publicRoom.room.code}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nickname: '觀戰5', role: 'spectator' }) });
+  assert.equal(fullSpectators.status, 409);
+  const spectatorSocket = io(base, { autoConnect: false }); spectatorSocket.connect(); await connect(spectatorSocket);
+  const spectatorView = await emit(spectatorSocket, 'room:enter', { code: publicRoom.room.code, session: spectators[0].session });
+  assert.equal(spectatorView.room.viewerRole, 'spectator'); assert.equal(spectatorView.room.canGuess, false); assert.deepEqual(spectatorView.room.guesses, []);
+  assert.match((await emit(spectatorSocket, 'game:guess', '0123')).error, /遊戲尚未開始/);
+  assert.deepEqual(await emit(spectatorSocket, 'chat:send', '大家好'), { ok: true });
+  const chatView = await emit(publicHostSocket, 'room:enter', { code: publicRoom.room.code, session: publicRoom.session });
+  assert.equal(chatView.room.chat.at(-1).text, '大家好'); assert.equal(chatView.room.chat.at(-1).role, 'spectator');
+  assert.match((await emit(spectatorSocket, 'room:switch-role', 'player')).error, /名額已滿/);
+  spectatorSocket.close(); publicHostSocket.close();
+  console.log('E2E passed: race modes, READY gate, leave, solo, bots, lobby, optional passwords, chat, spectators, secret protection, traditional rounds and mid-join');
 } finally {
   server.kill();
 }
